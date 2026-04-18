@@ -9,6 +9,8 @@ A multi-agent AI pipeline that automates job discovery, evaluates candidate-job 
 
 ## 🚀 Overview
 
+![Project Workflow](docs/total.png)
+
 This project is an end-to-end intelligent system designed to streamline the job application process by combining:
 * Automated job scraping
 * AI-driven candidate-job matching
@@ -20,6 +22,8 @@ The system leverages a multi-agent architecture orchestrated through n8n workflo
 ---
 
 ## 🧩 Architecture
+
+![System Architecture](docs/mermaid-diagram.png)
 
 The system is composed of multiple specialized agents working in sequence:
 
@@ -33,6 +37,8 @@ The system is composed of multiple specialized agents working in sequence:
 ---
 
 ## 🤖 Hybrid AI Strategy
+
+![Hybrid LLM Strategy](docs/hybrid.png)
 
 To optimize performance and drastically reduce operational API costs, the system implements a **Hybrid LLM approach**:
 * **Lightweight/Local Models:** Used for simple, repetitive, or high-volume tasks (like initial bulk filtering).
