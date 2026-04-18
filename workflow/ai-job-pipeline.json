@@ -1,0 +1,801 @@
+{
+  "name": "resume llm",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        80
+      ],
+      "id": "16538a33-a316-450a-b76b-0b0d826504ab",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/curious_coder~linkedin-jobs-scraper/run-sync-get-dataset-items?token=REDACTED",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n    \"count\": 70,\n    \"scrapeCompany\": true,\n    \"splitByLocation\": false,\n    \"splitCountry\": \"MA\",\n    \"urls\": [\n        \"https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4318730097&discover=recommended&discoveryOrigin=JOBS_HOME_JYMBII\",\n        \"https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4380734583&discover=recommended&discoveryOrigin=JOBS_HOME_JYMBII&start=24\",\n        \"https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4381919575&discover=recommended&discoveryOrigin=JOBS_HOME_JYMBII&start=48\",\n        \"https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4378788850&discover=recommended&discoveryOrigin=JOBS_HOME_JYMBII&start=96\",\n        \"https://www.linkedin.com/jobs/search/?currentJobId=4390869359&f_E=1&f_F=eng%2Cit&f_TPR=r604800&geoId=102787409&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true&sortBy=R\"\n    ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        80
+      ],
+      "id": "282731e4-6a6a-40ef-87d3-31a14aa9c7a8",
+      "name": "LInkedin job scrapper",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=here is the job posting information.\n\ncompany name : {{ $json.companyName }}\njob Description: {{ $json.descriptionText }}\n\n\n\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an expert LinkedIn job posting filtering agent.  \nYour only task is to determine whether or not the job posting provided to you is suitable for the specific candidate with the provided original resume. The original resume may include various skills or qualifications, you will have to think deeply and determine if any of the candidate\u2019s skillsets or knowledge is suitable to the job posting.  \n\nHere is the information from the job posting and company:  \nCompany Name: {{ $json.companyName }}  \nJob Posting Description: {{ $json.descriptionText }}  \n\nHere is the candidate\u2019s original resume:  {{ $('Extract from File').item.json.text }}\n\nIf the job posting is suitable to the candidate according to their skills, experience and knowledge. You must rate whether or not the candidate\u2019s resume is suitable to the job posting out of 100. If the rating is 0, then the output will be 0 meaning that the job posting in NOT suitable to the candidate at all. If the rating is 100, then the output will be 100 meaning that the job posting is extremely suitable to the candidate.  \n\nOutput in JSON format as indicated in the output parser."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1040,
+        -432
+      ],
+      "id": "804262b7-dbac-46e6-a6d4-6caf19ef5f7c",
+      "name": "AI Agent",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"company_name\": \"string\",\n  \"job_description\":\"string\",\n  \"rating\": \"number\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1216,
+        -208
+      ],
+      "id": "1abffcf1-6956-4161-acab-031df2f236df",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4f134cf7-8b72-45f0-9f49-e535a9079652",
+              "leftValue": "={{ $json.output.rating.toNumber()}} ",
+              "rightValue": 50,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        112,
+        512
+      ],
+      "id": "1e28b1aa-10bc-4f60-be27-b55f7ccd7ba8",
+      "name": "50 perc higher"
+    },
+    {
+      "parameters": {
+        "jsCode": "// This works perfectly when placed AFTER the \"Loop Over Items\" node (once the loop is done)\nconst results = [];\n\nfor (const item of $input.all()) {\n  // 1. Extract the resume HTML body\n  let resumeBody = \"\";\n  if (typeof item.json.output === \"string\") {\n    resumeBody = item.json.output;\n  } else if (item.json.output?.text) {\n    resumeBody = item.json.output.text;\n  } else if (item.json.text) {\n    resumeBody = item.json.text;\n  }\n\n  // Clean up LLM artifacts\n  resumeBody = resumeBody.replace(/```html|```/g, \"\").trim();\n\n  // 2. Identify Company Name\n  // We check the item's JSON first, then the output, then fallback\n  let companyName = item.json.company_name || \n                    item.json.companyName || \n                    item.json.output?.company_name ||\n                    \"Tailored\";\n  \n  // Manual overrides based on content\n  if (companyName === \"Tailored\") {\n    if (resumeBody.includes(\"VISEO\")) companyName = \"VISEO\";\n    else if (resumeBody.includes(\"L3M HOLDING\")) companyName = \"L3M HOLDING\";\n    else if (resumeBody.includes(\"MyUnisoft\")) companyName = \"MyUnisoft\";\n  }\n\n  // 3. Make filename safe for OS\n  const safeCompanyName = companyName.replace(/[^a-z0-9]/gi, \"_\").toLowerCase();\n  const fileName = `Resume_REDACTED_${safeCompanyName}.html`;\n\n  // 4. Build the final HTML with your styles\n  const finalHtml = `<!DOCTYPE html>\n<html lang=\"fr\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>CV - REDACTED \u2013 ${companyName}</title>\n  <style>\n    :root { --body-padding: 1.4cm 1.2cm 1cm 1.4cm; }\n    body {\n      font-family: \"Latin Modern Roman\", \"Times New Roman\", serif;\n      font-size: 11pt;\n      line-height: 1.3;\n      color: #000;\n      margin: 0;\n      padding: var(--body-padding);\n      background: white;\n    }\n    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }\n    .header-table td { vertical-align: top; }\n    .name { font-size: 22pt; font-weight: bold; margin: 0 0 2px 0; letter-spacing: 0.02em; }\n    .contact-info { text-align: right; font-size: 9pt; line-height: 1.8; }\n    .contact-info a { text-decoration: none; color: #000; }\n    .contact-info a:hover { text-decoration: underline; }\n    section { margin-top: 6px; margin-bottom: 4px; }\n    h2 {\n      font-size: 11pt;\n      text-transform: uppercase;\n      font-variant: small-caps;\n      font-weight: bold;\n      border-bottom: 1px solid #000;\n      margin: 0 0 4px 0;\n      padding-bottom: 1px;\n      letter-spacing: 0.05em;\n    }\n    .row-spread { display: flex; justify-content: space-between; align-items: baseline; font-weight: bold; font-size: 10.5pt; }\n    .sub-row { display: flex; justify-content: space-between; font-style: italic; font-size: 9.5pt; margin-bottom: 2px; }\n    ul { margin: 3px 0 7px 18px; padding: 0; list-style-type: disc; }\n    li { margin-bottom: 2px; text-align: justify; font-size: 10pt; }\n    .skills-container { font-size: 10pt; line-height: 1.6; }\n    .skills-container div { margin-bottom: 1px; }\n    .bold { font-weight: bold; }\n    .italic { font-style: italic; }\n    .small-text { font-size: 9pt; font-weight: normal; }\n    p { font-size: 10pt; margin: 0; text-align: justify; line-height: 1.4; }\n  </style>\n</head>\n<body>\n${resumeBody}\n</body>\n</html>`;\n\n  // 5. Push individual result back into the n8n item array\n  results.push({\n    json: {\n      ...item.json, // Keep original data (company name, etc.)\n      html_content: finalHtml,\n      dynamicFileName: fileName,\n      resolvedCompanyName: companyName\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        384
+      ],
+      "id": "869b5baa-5c86-4c00-aa39-44a3d035416c",
+      "name": "HTML formatter"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Job Posting Description: {{ $json.output.job_description }}\nCandidate's Original Resume: {{ ${'Get Original Resume'}.item.json.content }}",
+        "options": {
+          "systemMessage": "=You are an expert resume building specialist. Your task is to THINK DEEPLY to build AND enhance the originally provided resume based on the job requirements from the LinkedIn job postings.\n\nNOTE:\nThe original resume may be unstructured but contains all of the candidate's relevant skills, experience and education.\n\nLANGUAGE RULE \u2014 CRITICAL:\n- Detect the language of the job posting (French or English)\n- The ENTIRE resume output must be in that same language\n- Section titles, bullet points, summary, everything \u2014 must match the job posting language\n- If French job: use French section titles and French text throughout\n- If English job: use English section titles and English text throughout\n\nINSTRUCTIONS:\n- Take the original resume content and the job posting details\n- Recreate and enhance the resume to tailor and match the job requirements of the posting\n- Keep all original sections in this exact order: Profile, Education, Projet Acad\u00e9mique - PFE, Projet Personnel - SMART, Experience, Comp\u00e9tences\n- Improve the content to highlight relevant skills and experiences\n- DO NOT add extra sections like Soft Skills, Centres d'int\u00e9r\u00eat, Mati\u00e8res principales, Langues, Awards\n- DO NOT remove or rename the core sections listed above\n\nIMPORTANT FORMATTING RULES:\n- Output ONLY clean HTML content, no markdown formatting\n- Do NOT include ```html or ``` or backticks in your response\n- Do NOT include the word \"html\" at the beginning\n- Start your response directly with <table class=\"header-table\"> and nothing before it\n- End your response after the closing </section> of Comp\u00e9tences\n\nEXACT OUTPUT STRUCTURE \u2014 follow this precisely, do not deviate:\n\n<table class=\"header-table\">\n  <tr>\n    <td>\n      <div class=\"name\">REDACTED</div>\n      <div class=\"bold\">[Job title tailored to the posting \u2014 in job language]</div>\n      <div>FST, REDACTED</div>\n    </td>\n    <td class=\"contact-info\">\n      REDACTED<br>\n      <a href=\"mailto:REDACTEDsirajsani27@hotmail.com\">REDACTEDsirajsani27@hotmail.com</a><br>\n      <a href=\"https://github.com/REDACTEDss22\">GitHub</a> &nbsp;|&nbsp;\n      <a href=\"https://linkedin.com/in/REDACTED-s-b51a43167/\">LinkedIn</a> &nbsp;|&nbsp;\n      <a href=\"https://behance.net/REDACTEDsiraj18\">Behance</a>\n    </td>\n  </tr>\n</table>\n\n<section>\n  <h2>[Profile / Profil \u2014 match job language]</h2>\n  <p>[2-3 sentence summary tailored to the job posting, in job language]</p>\n</section>\n\n<section>\n  <h2>[Education / Formation \u2014 match job language]</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Baccalaur\u00e9at s\u00e9rie Sciences Math\u00e9matiques A</span>\n    <span class=\"small-text\">2021</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Lyc\u00e9e Molay Ismail, Kelaat Sraghna</span>\n  </div>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Dipl\u00f4me d'\u00c9tudes Universitaires Scientifiques et Techniques (DEUST) \u2013 MIP</span>\n    <span class=\"small-text\">Sep 2022 \u2013 Juil 2024</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Universit\u00e9 Moulay Ismail FST, REDACTED</span>\n  </div>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Licence en Sciences et Techniques (LST) \u2013 G\u00e9nie Logiciel</span>\n    <span class=\"small-text\">Oct 2024 \u2013 Mars 2026</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Universit\u00e9 Moulay Ismail FST, REDACTED</span>\n  </div>\n</section>\n\n<section>\n  <h2>Projet Acad\u00e9mique \u2013 PFE</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Projet de fin d'\u00e9tudes \u2013 Plateforme TABADOL</span>\n    <span class=\"italic small-text\">TypeScript, React, Vite.js, Supabase, Prisma ORM, Grafana</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">[One line project description tailored to job, in job language]</span>\n  </div>\n  <ul>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>Projet Personnel \u2013 SMART</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Syst\u00e8me de gestion acad\u00e9mique \u2013 Plateforme SMART</span>\n    <span class=\"italic small-text\">TypeScript, React, Node.js, PostgreSQL, Drizzle ORM</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">[One line project description tailored to job, in job language]</span>\n  </div>\n  <ul>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>[Experience / Exp\u00e9rience \u2014 match job language]</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Graphiste Freelance</span>\n    <span class=\"small-text\">2022 \u2013 2025</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">Ind\u00e9pendant</span>\n    <span class=\"italic\">Online</span>\n  </div>\n  <ul>\n    <li>[Tailored bullet highlighting relevant skills for this job posting, in job language]</li>\n    <li>[Tailored bullet in job language]</li>\n    <li>[Tailored bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>[Comp\u00e9tences / Technical Skills \u2014 match job language]</h2>\n  <div class=\"skills-container\">\n    <div><span class=\"bold\">Languages:</span> C, TypeScript, Javascript, HTML+CSS, PHP, JAVA, SQL, PL/SQL</div>\n    <div><span class=\"bold\">Frameworks:</span> [highlight frameworks relevant to job first]</div>\n    <div><span class=\"bold\">Backend:</span> Node.js, Express.js, REST API, JWT, OAuth</div>\n    <div><span class=\"bold\">Database:</span> PostgreSQL, Supabase, Oracle Database, MySQL</div>\n    <div><span class=\"bold\">DevOps:</span> Vercel, Supabase, Docker, CI/CD</div>\n    <div><span class=\"bold\">Soft Skills:</span> [in job language] Problem Solving, Auto-formation, Capacit\u00e9 d'adaptation</div>\n  </div>\n</section>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2304,
+        -320
+      ],
+      "id": "6b2c5ea1-bb0c-4bc0-82df-cf271e1a296c",
+      "name": "Resume building agent"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "html_content",
+        "options": {
+          "fileName": "={{ $json.dynamicFileName }}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        976,
+        384
+      ],
+      "id": "35b1524c-5be8-4341-bd1a-b122c6042e70",
+      "name": "Convert to File1"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/root/.n8n-files/{{ $binary.data.fileName }}",
+        "options": {
+          "append": false
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        1216,
+        384
+      ],
+      "id": "3ab46427-1d17-4edb-967b-012e599c343c",
+      "name": "Read/Write Files from Disk2"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        816,
+        -592
+      ],
+      "id": "281b7f20-719f-4b56-af9f-b42041ed34a9",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        -192
+      ],
+      "id": "aade9169-6d6b-4981-aee7-3b968e868048",
+      "name": "Wait",
+      "webhookId": "REDACTED_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/root/.n8n-files/REDACTED.pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        16,
+        80
+      ],
+      "id": "3580d6ff-d397-44c8-92b4-fc1dccb278d4",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        80
+      ],
+      "id": "7ba794e0-0247-4376-a25d-ceec88e56a9d",
+      "name": "When clicking \u2018Execute workflow\u2019"
+    },
+    {
+      "parameters": {
+        "model": "qwen-fast:latest",
+        "options": {
+          "lowVram": true,
+          "numCtx": 4096,
+          "format": "json"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        352,
+        624
+      ],
+      "id": "6dd8cc28-176b-4402-afdb-3cd0d78da5d1",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2160,
+        -528
+      ],
+      "id": "41b1f78d-5f03-4425-bd5e-a724388e77e9",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "amount": 4
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2528,
+        -80
+      ],
+      "id": "e7a6061a-6190-4c16-a3b7-303495bed3ec",
+      "name": "Wait2",
+      "webhookId": "REDACTED_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "model": "=openrouter/pony-alpha",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        -96
+      ],
+      "id": "c6d273a4-d453-4825-9a0a-70b70681e915",
+      "name": "OpenRouter Chat Model2",
+      "credentials": {
+        "openRouterApi": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "opencode",
+          "mode": "list",
+          "cachedResultName": "opencode"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1040,
+        -208
+      ],
+      "id": "be702992-3d60-4ab4-b8f9-dc95a4f15d9e",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=here is the job posting information.\n\ncompany name : {{ $json.companyName }}\njob Description: {{ $json.descriptionText }}\n\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an expert LinkedIn job posting filtering agent.  \nYour only task is to determine whether or not the job posting provided to you is suitable for the specific candidate with the provided original resume. The original resume may include various skills or qualifications, you will have to think deeply and determine if any of the candidate\u2019s skillsets or knowledge is suitable to the job posting.  \n\nHere is the information from the job posting and company:  \nCompany Name: {{ $json.companyName }}  \nJob Posting Description: {{ $json.descriptionText }}  \n\nHere is the candidate\u2019s original resume:  {{ $('Extract from File').item.json.text }}\n\nIf the job posting is suitable to the candidate according to their skills, experience and knowledge. You must rate whether or not the candidate\u2019s resume is suitable to the job posting out of 100. If the rating is 0, then the output will be 0 meaning that the job posting in NOT suitable to the candidate at all. If the rating is 100, then the output will be 100 meaning that the job posting is extremely suitable to the candidate.  \n\nOutput in JSON format as indicated: \n{\n  \"company_name\": \"string\",\n  \"job_description\":\"string\",\n  \"rating\": \"number\"\n}\n\nDO NOT OUTPUT ANYTHING ELSE THEN THE JSON FORMAT IT MUST BE EXACTLY LIKE I INDICATED\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -256,
+        384
+      ],
+      "id": "ae29c6a7-4599-4822-81a8-f9468822b084",
+      "name": "AI Agent1",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"company_name\": \"string\",\n  \"job_description\":\"string\",\n  \"rating\": \"number\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        688
+      ],
+      "id": "494d7823-ff86-4b57-9eac-1f14cbae4d70",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Job Posting Description: {{ $json.output.job_description }}\nCandidate's Original Resume: {{ ${'Get Original Resume'}.item.json.content }}",
+        "options": {
+          "systemMessage": "=You are an expert resume building specialist. Your task is to THINK DEEPLY to build AND enhance the originally provided resume based on the job requirements from the LinkedIn job postings.\n\nNOTE:\nThe original resume may be unstructured but contains all of the candidate's relevant skills, experience and education.\n\nLANGUAGE RULE \u2014 CRITICAL:\n- Detect the language of the job posting (French or English)\n- The ENTIRE resume output must be in that same language\n- Section titles, bullet points, summary, everything \u2014 must match the job posting language\n- If French job: use French section titles and French text throughout\n- If English job: use English section titles and English text throughout\n\nINSTRUCTIONS:\n- Take the original resume content and the job posting details\n- Recreate and enhance the resume to tailor and match the job requirements of the posting\n- Keep all original sections in this exact order: Profile, Education, Projet Acad\u00e9mique - PFE, Projet Personnel - SMART, Experience, Comp\u00e9tences\n- Improve the content to highlight relevant skills and experiences\n- DO NOT add extra sections like Soft Skills, Centres d'int\u00e9r\u00eat, Mati\u00e8res principales, Langues, Awards\n- DO NOT remove or rename the core sections listed above\n\nIMPORTANT FORMATTING RULES:\n- Output ONLY clean HTML content, no markdown formatting\n- Do NOT include ```html or ``` or backticks in your response\n- Do NOT include the word \"html\" at the beginning\n- Start your response directly with <table class=\"header-table\"> and nothing before it\n- End your response after the closing </section> of Comp\u00e9tences\n\nEXACT OUTPUT STRUCTURE \u2014 follow this precisely, do not deviate:\n\n<table class=\"header-table\">\n  <tr>\n    <td>\n      <div class=\"name\">REDACTED</div>\n      <div class=\"bold\">[Job title tailored to the posting \u2014 in job language]</div>\n      <div>FST, REDACTED</div>\n    </td>\n    <td class=\"contact-info\">\n      REDACTED<br>\n      <a href=\"mailto:REDACTEDsirajsani27@hotmail.com\">REDACTEDsirajsani27@hotmail.com</a><br>\n      <a href=\"https://github.com/REDACTEDss22\">GitHub</a> &nbsp;|&nbsp;\n      <a href=\"https://linkedin.com/in/REDACTED-s-b51a43167/\">LinkedIn</a> &nbsp;|&nbsp;\n      <a href=\"https://behance.net/REDACTEDsiraj18\">Behance</a>\n    </td>\n  </tr>\n</table>\n\n<section>\n  <h2>[Profile / Profil \u2014 match job language]</h2>\n  <p>[2-3 sentence summary tailored to the job posting, in job language]</p>\n</section>\n\n<section>\n  <h2>[Education / Formation \u2014 match job language]</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Baccalaur\u00e9at s\u00e9rie Sciences Math\u00e9matiques A</span>\n    <span class=\"small-text\">2021</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Lyc\u00e9e Molay Ismail, Kelaat Sraghna</span>\n  </div>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Dipl\u00f4me d'\u00c9tudes Universitaires Scientifiques et Techniques (DEUST) \u2013 MIP</span>\n    <span class=\"small-text\">Sep 2022 \u2013 Juil 2024</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Universit\u00e9 Moulay Ismail FST, REDACTED</span>\n  </div>\n\n  <div class=\"row-spread\" style=\"margin-top:5px;\">\n    <span>Licence en Sciences et Techniques (LST) \u2013 G\u00e9nie Logiciel</span>\n    <span class=\"small-text\">Oct 2024 \u2013 Mars 2026</span>\n  </div>\n  <div class=\"sub-row\">\n    <span>Universit\u00e9 Moulay Ismail FST, REDACTED</span>\n  </div>\n</section>\n\n<section>\n  <h2>Projet Acad\u00e9mique \u2013 PFE</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Projet de fin d'\u00e9tudes \u2013 Plateforme TABADOL</span>\n    <span class=\"italic small-text\">TypeScript, React, Vite.js, Supabase, Prisma ORM, Grafana</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">[One line project description tailored to job, in job language]</span>\n  </div>\n  <ul>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>Projet Personnel \u2013 SMART</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Syst\u00e8me de gestion acad\u00e9mique \u2013 Plateforme SMART</span>\n    <span class=\"italic small-text\">TypeScript, React, Node.js, PostgreSQL, Drizzle ORM</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">[One line project description tailored to job, in job language]</span>\n  </div>\n  <ul>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n    <li>[Tailored achievement bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>[Experience / Exp\u00e9rience \u2014 match job language]</h2>\n\n  <div class=\"row-spread\" style=\"margin-top:6px;\">\n    <span>Graphiste Freelance</span>\n    <span class=\"small-text\">2022 \u2013 2025</span>\n  </div>\n  <div class=\"sub-row\">\n    <span class=\"italic\">Ind\u00e9pendant</span>\n    <span class=\"italic\">Online</span>\n  </div>\n  <ul>\n    <li>[Tailored bullet highlighting relevant skills for this job posting, in job language]</li>\n    <li>[Tailored bullet in job language]</li>\n    <li>[Tailored bullet in job language]</li>\n  </ul>\n</section>\n\n<section>\n  <h2>[Comp\u00e9tences / Technical Skills \u2014 match job language]</h2>\n  <div class=\"skills-container\">\n    <div><span class=\"bold\">Languages:</span> C, TypeScript, Javascript, HTML+CSS, PHP, JAVA, SQL, PL/SQL</div>\n    <div><span class=\"bold\">Frameworks:</span> [highlight frameworks relevant to job first]</div>\n    <div><span class=\"bold\">Backend:</span> Node.js, Express.js, REST API, JWT, OAuth</div>\n    <div><span class=\"bold\">Database:</span> PostgreSQL, Supabase, Oracle Database, MySQL</div>\n    <div><span class=\"bold\">DevOps:</span> Vercel, Supabase, Docker, CI/CD</div>\n    <div><span class=\"bold\">Soft Skills:</span> [in job language] Problem Solving, Auto-formation, Capacit\u00e9 d'adaptation</div>\n  </div>\n</section>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        352,
+        384
+      ],
+      "id": "d0c5e255-1148-4a91-a912-98d34123260c",
+      "name": "Resume building agent1"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1.1,
+      "position": [
+        128,
+        304
+      ],
+      "id": "7d873156-bc9b-4aac-827e-4333e674bfea",
+      "name": "Think"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        640
+      ],
+      "id": "21c95053-b654-4075-9cba-26f9cf34d1fa",
+      "name": "Groq Chat Model2",
+      "credentials": {
+        "groqApi": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4f134cf7-8b72-45f0-9f49-e535a9079652",
+              "leftValue": "={{ $json.output.rating.toNumber()}} ",
+              "rightValue": 50,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1728,
+        -400
+      ],
+      "id": "e7b6663c-45c3-48c9-9ea3-69f97b55bfcf",
+      "name": "50 perc higher1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// This works perfectly when placed AFTER the \"Loop Over Items\" node (once the loop is done)\nconst results = [];\n\nfor (const item of $input.all()) {\n  // 1. Extract the resume HTML body\n  let resumeBody = \"\";\n  if (typeof item.json.output === \"string\") {\n    resumeBody = item.json.output;\n  } else if (item.json.output?.text) {\n    resumeBody = item.json.output.text;\n  } else if (item.json.text) {\n    resumeBody = item.json.text;\n  }\n\n  // Clean up LLM artifacts\n  resumeBody = resumeBody.replace(/```html|```/g, \"\").trim();\n\n  // 2. Identify Company Name\n  // We check the item's JSON first, then the output, then fallback\n  let companyName = item.json.company_name || \n                    item.json.companyName || \n                    item.json.output?.company_name ||\n                    \"Tailored\";\n  \n  // Manual overrides based on content\n  if (companyName === \"Tailored\") {\n    if (resumeBody.includes(\"VISEO\")) companyName = \"VISEO\";\n    else if (resumeBody.includes(\"L3M HOLDING\")) companyName = \"L3M HOLDING\";\n    else if (resumeBody.includes(\"MyUnisoft\")) companyName = \"MyUnisoft\";\n  }\n\n  // 3. Make filename safe for OS\n  const safeCompanyName = companyName.replace(/[^a-z0-9]/gi, \"_\").toLowerCase();\n  const fileName = `Resume_REDACTED_${safeCompanyName}.html`;\n\n  // 4. Build the final HTML with your styles\n  const finalHtml = `<!DOCTYPE html>\n<html lang=\"fr\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>CV - REDACTED \u2013 ${companyName}</title>\n  <style>\n    :root { --body-padding: 1.4cm 1.2cm 1cm 1.4cm; }\n    body {\n      font-family: \"Latin Modern Roman\", \"Times New Roman\", serif;\n      font-size: 11pt;\n      line-height: 1.3;\n      color: #000;\n      margin: 0;\n      padding: var(--body-padding);\n      background: white;\n    }\n    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }\n    .header-table td { vertical-align: top; }\n    .name { font-size: 22pt; font-weight: bold; margin: 0 0 2px 0; letter-spacing: 0.02em; }\n    .contact-info { text-align: right; font-size: 9pt; line-height: 1.8; }\n    .contact-info a { text-decoration: none; color: #000; }\n    .contact-info a:hover { text-decoration: underline; }\n    section { margin-top: 6px; margin-bottom: 4px; }\n    h2 {\n      font-size: 11pt;\n      text-transform: uppercase;\n      font-variant: small-caps;\n      font-weight: bold;\n      border-bottom: 1px solid #000;\n      margin: 0 0 4px 0;\n      padding-bottom: 1px;\n      letter-spacing: 0.05em;\n    }\n    .row-spread { display: flex; justify-content: space-between; align-items: baseline; font-weight: bold; font-size: 10.5pt; }\n    .sub-row { display: flex; justify-content: space-between; font-style: italic; font-size: 9.5pt; margin-bottom: 2px; }\n    ul { margin: 3px 0 7px 18px; padding: 0; list-style-type: disc; }\n    li { margin-bottom: 2px; text-align: justify; font-size: 10pt; }\n    .skills-container { font-size: 10pt; line-height: 1.6; }\n    .skills-container div { margin-bottom: 1px; }\n    .bold { font-weight: bold; }\n    .italic { font-style: italic; }\n    .small-text { font-size: 9pt; font-weight: normal; }\n    p { font-size: 10pt; margin: 0; text-align: justify; line-height: 1.4; }\n  </style>\n</head>\n<body>\n${resumeBody}\n</body>\n</html>`;\n\n  // 5. Push individual result back into the n8n item array\n  results.push({\n    json: {\n      ...item.json, // Keep original data (company name, etc.)\n      html_content: finalHtml,\n      dynamicFileName: fileName,\n      resolvedCompanyName: companyName\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2704,
+        -288
+      ],
+      "id": "05d25f17-2f4c-46f8-bbfb-769bb2340670",
+      "name": "HTML formatter1"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "html_content",
+        "options": {
+          "fileName": "={{ $json.dynamicFileName }}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2960,
+        -288
+      ],
+      "id": "66e04356-7a5c-4765-93e6-4a3f0f461172",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/root/.n8n-files/{{ $binary.data.fileName }}",
+        "options": {
+          "append": false
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        3200,
+        -288
+      ],
+      "id": "4171f7f3-9245-4f8b-9c5d-fb7b4736e5cb",
+      "name": "Read/Write Files from Disk3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "LInkedin job scrapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LInkedin job scrapper": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "50 perc higher1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "50 perc higher": {
+      "main": [
+        [
+          {
+            "node": "Resume building agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume building agent": {
+      "main": [
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTML formatter1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML formatter": {
+      "main": [
+        [
+          {
+            "node": "Convert to File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File1": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking \u2018Execute workflow\u2019": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Resume building agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Resume building agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Resume building agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "50 perc higher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Resume building agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume building agent1": {
+      "main": [
+        [
+          {
+            "node": "HTML formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "50 perc higher1": {
+      "main": [
+        [
+          {
+            "node": "Resume building agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML formatter1": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "86124394-6962-470b-a7e9-25ff8899ee3b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "REDACTED_META_ID"
+  },
+  "id": "REDACTED_CREDENTIAL_ID",
+  "tags": []
+}

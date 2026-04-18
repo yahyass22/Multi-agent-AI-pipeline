@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: postgres_ai
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n_user
+      - POSTGRES_PASSWORD=REDACTED_PASSWORD
+      - POSTGRES_DB=n8n_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n_user -d n8n_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n_ai
+    user: root
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Africa/Casablanca
+      - TZ=Africa/Casablanca
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_POSTGRESDB_USER=n8n_user
+      - DB_POSTGRESDB_PASSWORD=REDACTED_PASSWORD
+      - N8N_DEFAULT_BINARY_DATA_MODE=memory
+      - N8N_PAYLOAD_SIZE_MAX=128
+      - N8N_BLOCK_FS_WRITE_ACCESS=false 
+    
+    tmpfs:
+      - /home/node/.n8n/binaryData:size=512M
+    volumes:
+      - n8n_data:/root/.n8n
+      # Redacted local system path
+      - "./n8n-files:/root/.n8n-files"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  n8n_data:
+  postgres_data:
